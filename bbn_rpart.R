@@ -31,10 +31,10 @@ df <- data.frame(rawdata)
 
 #View(df)
 #Period = df$D1
-##Droping the Period Column
+#--------Droping the Period Column
 dfd<- df[, !(names(df) %in% c("Period"))]
 
-# Impute the missing values using m
+#Impute the missing values using m
 #library(missForest)
 set.seed(123)
 #df_imp <- missForest(dfd)
@@ -426,11 +426,12 @@ str(df_sdf)
   #correlation, regardless of the sign. It then removes one of variable 
   #in each such pair. The end goal is to avoid learning Gaussian 
   #Bayesian networks which clusters of highly-connected nodes,
-  #for both speed and interpretability.
-# screen continuous data for highly correlated pairs of variables.
-threshold = 0.5
-df_c = dedup(df_sdf, threshold, debug = FALSE)
-# Visualisation the correlation matrix
+  #for both speed and intepretability.
+  #screen continuous data for highly correlated pairs of variables.
+threshold = 0.90
+df_c = dedup(df_sdf, threshold, debug = TRUE)
+
+#Visualisation the correlation matrix
 {cor_matrix <- cor(df_c, use = "complete.obs")
   
   # Option 1: Using corrplot package (more customizable)
@@ -517,14 +518,15 @@ set.seed(123)
 #)
 
 #data.frame(lapply(df_sd, as.numeric))
-# boot strength 
-
-  boot <- boot.strength(df_sd, algorithm = "hc", R = 500, 
+#?boot.strength
+set.seed(123)
+boot <- boot.strength(df_sd, algorithm = "hc", R = 500, 
                       algorithm.args = list(score = "loglik", iss = 10), # Changed from "bic" to "bic-g"
   debug = TRUE)
 
 boot[(boot$strength >= 0.85) & (boot$direction >= 0.5),]
 
+write.csv(boot, file = "boot_strength.csv", row.names = FALSE)
 #Setting the Threshold
 #Plotting the distribution of arc strengths
   #The bagging and bayes.factors encode the complete distribution 
@@ -542,9 +544,13 @@ avg.boot = averaged.network(boot, threshold = 0.5)
 vs = vstructs(avg.boot)
 graphviz.plot(avg.boot)
 
-strength.plot(avg.boot, boot,shape = "ellipse")
-avg.boot$nodes$D1$mb
+spt = strength.plot(avg.boot, boot,shape = "ellipse",fontsize = 12,
+               main = "Bayesian Belief Network Feature Selection")
+qgraph(spt, layout = "spring", labels = nodes(avg.boot))
+?qgraph
 #-----Markov Blanket
+avg.boot$nodes$D1$nbr
+avg.boot$nodes$D1$children
 #The Markov Blanket of a node is the set of nodes that 
 #makes the node conditionally independent of all other nodes 
 #in the network. In simpler terms, it's the minimal set of nodes 
@@ -635,13 +641,14 @@ tuning_grid <- expand.grid(
 # Enhanced cross-validation settings
 controlObject <- trainControl(
   method = "repeatedcv",       # Repeated cross-validation
-  number = 5,                 # 10-fold
+  number = 5,                 # 5-fold
   classProbs = TRUE,           # Calculate class probabilities
   summaryFunction = multiClassSummary, # Detailed metrics for multiclass problems
   savePredictions = "final",   # Save predictions for further analysis
   returnResamp = "all"         # Return all resampling results
 )
 print(levels(training_set$D1))
+
 # Method 1: If you want to keep the original values but make them valid for modeling
 training_set$D1 <- factor(training_set$D1)
 levels(training_set$D1) <- make.names(levels(training_set$D1))
@@ -669,7 +676,8 @@ fit.final <- rpartModel$finalModel
 
 # Plot the model with enhanced visualization
 par(mfrow = c(1, 1), mar = c(1, 1, 1, 1))
-rpart.plot(fit.final)
+#rpart plot
+rpart.plot(fit.final,main="Rpart:D1 as target feature")
 
 #Evaluate model on test set
 predictions <- predict(rpartModel, newdata = test_set, type = "raw")
@@ -764,13 +772,13 @@ selected_rpartdf <- df_sd[, base_vars, drop = FALSE]
 if("D1" %in% colnames(df_sd) && !("D1" %in% top_vars)) {
   selected_rpartdf$D1 <- df_sd$D1
 }
+str(selected_rpartdf)
 
 #----------ENSEMBLE BBN and RPART Important features----
-
 # First, identify variables in selected_rpartdf that are not in selected_data
 new_vars <- setdiff(names(selected_rpartdf), names(selected_data))
 
-# Print the new variables that will be added
+#---Print the new variables that will be added
 print("New variables to be added:")
 print(new_vars)
 
@@ -802,387 +810,44 @@ str(Ensemble_Imp_features)
 # Check the structure of the new data frame
 str(selected_rpartdf)
 ## Decision Tree Plots
-rpart.plot(fit,shadow.col = "gray", digits = 4, 
+rpart.plot(fit.final,shadow.col = "gray", digits = 4, 
            fallen.leaves = TRUE,
            roundint=FALSE,type = 4, extra = 104)
 
-# Plot the tree using rpart.plot
-rpart.plot(fit, type = 4, 
-           fallen.leaves = TRUE, box.palette = "Blues", 
-           col = "red", nn = TRUE)
-
-
-
-
-###-----------Grid Search RPART------------
-library(rpart)
-library(caret)
-
-# Define the hyper parameter grid
-controlObject <- trainControl(method = "repeatedcv",repeats = 5,number = 10)
-
-# Perform grid search using cross-validation
-set.seed(123)
-rpartModel <- caret::train(D1 ~.,
-                           data = training_set,
-                           method = "rpart",
-                           tuneLength = 30,
-                           trControl = controlObject)
-
-# Plot the trained rpart model
-fit.final = rpartModel$finalModel
-#
-par(mfrow = c(1, 1))  # Or par(mfcol = c(1, 1))
-rpart.plot(fit.final,extra=104,
-           shadow.col = "gray")
-
-###Perfomance valuation
-#Confusion matrix
-cm <- as.matrix(table(truth=test_set$D1,prediction))
-cm
-
-#-Defining Variables
-n = sum(cm) # number of instances
-nc = nrow(cm) # number of classes
-diag = diag(cm) # number of correctly classified instances per class 
-rowsums = apply(cm, 1, sum) # number of instances per class
-colsums = apply(cm, 2, sum) # number of predictions per class
-p = rowsums / n # distribution of instances over the actual classes
-q = colsums / n # distribution of instances over the predicted classes
-
-##Accuracy Calculation
-accuracy = sum(diag)/n
-accuracy 
-####Per-class Precision, Recall, and F-1
-#Precision is defined as the fraction of correct predictions for a certain class, 
-#recall is the fraction of instances of a class that were correctly predicted
-# F-1 score is also commonly reported. It is defined as the harmonic mean (or a weighted average) 
-#of precision and recall
-precision = diag / colsums 
-recall = diag / rowsums 
-f1 = 2 * precision * recall / (precision + recall) 
-data.frame(precision, recall, f1) 
-###Macro-Averaged matrices-performance measures
-macroPrecision = mean(precision)
-macroRecall = mean(recall)
-macroF1 = mean(f1)
-data.frame(macroPrecision, macroRecall, macroF1)
-
-###Multiclass ROC
-packages1 <- c("multiROC","pROC","plotROC","ROCR")
+## ------ENSEMBLE PLOT-------
+#install.packages("qgraph")
+packages1 <- c("qgraph","bootnet","NetworkComparisonTest","pcalg","bnlearn")
 pkgs2inst <- !(packages1 %in% (.packages(all.available=T)))
 if (any(pkgs2inst)) install.packages(packages1[pkgs2inst])
 lapply(packages1, require, character.only=T)
 rm(packages1,pkgs2inst)
 
-auc=multiclass.roc(response=test_set$D32,predictor= factor(prediction, ordered = TRUE),
-                   plot=TRUE,print.auc=TRUE,legacy.axes=TRUE,percent=TRUE, 
-                   xlab="False Positive Percentage",
-                   ylab="True Postive Percentage",col="#377eb8",lwd=4)
+n_vars = setdiff(new_vars, "D1")
 
-predictor= factor(prediction, ordered = TRUE)
+# white list from RPART
+wl = cbind(from=n_vars,to="D1")
+set.seed(241)
+boot_rpt <- boot.strength(df_sd,algorithm = "hc", R = 500, 
+                      algorithm.args = list(score = "loglik", iss = 10, whitelist = wl), # Changed from "bic" to "bic-g"
+                      debug = TRUE)
 
+boot_rpt[(boot_rpt$strength >= 0.85) & (boot_rpt$direction >= 0.5),]
 
-########ENSEMBLE XGBOOST##########
-library(caret)
-featurePlot(x = Cleandf[, "NPL_Ratio"],y = dsurvey$D40,
-            ## Add some space between the panels
-            between = list(x = 1, y = 1),
-            ## Add a background grid ('g') and a smoother ('smooth')
-            type = c("g", "p", "smooth"))
-#splitting the dataset into training and test set
-library(caTools)
-set.seed(123)
-dataset= dsurvey
-split = sample.split(dataset$D1,SplitRatio = 0.80)
-training_set = subset(dataset,split == TRUE)
-test_set = subset(dataset,split == FALSE)
-
-#10-fold cross-validation
-controlObject <- trainControl(method = "repeatedcv",repeats = 5,number = 10)
-
-#RPART, RandomForest ,neural networks, and SVMs were created as follows
-install.packages('earth')
-library(earth)
-set.seed(123)
-earthModel <- train(D40 ~ ., data = training_set,method = "earth",
-                    tuneGrid = expand.grid(.degree = 1,.nprune = 2:25),
-                    trControl = controlObject)
-set.seed(123)
-svmRModel <- train(D40 ~ ., data = training_set,
-                    method = "svmRadial",
-                    tuneLength = 15,
-                    trControl = controlObject)
-
-nnetGrid <- expand.grid(.decay = c(0.001, .01, .1),
-                          .size = seq(1, 27, by = 2),
-                          .bag = FALSE)
-#Neural network
-library(NeuralNetTools)
-install.packages('NeuralNetTools')
-set.seed(123)
-library(nnet)
-i <-names(training_set)
-form <-as.formula(paste("D40 ~", paste(i[!i %in% "dep"], collapse =" + ")))
-nn <-nnet.formula(form,size=10,data=training_set)
-plotnet(nn)
-olden(nn)
-##
-nnetModel <- train(D40 ~ .,
-                    data = training_set,
-                    method = "avNNet",
-                    tuneGrid = nnetGrid,
-                    linout = TRUE,
-                    trace = FALSE,
-                    maxit = 1000,
-                    trControl = controlObject)
-set.seed(123)
-rpartModel <- train(D40 ~ .,
-                      data = training_set,
-                      method = "rpart",
-                      tuneLength = 30,
-                      trControl = controlObject)
-set.seed(123)
-rfModel <- train(D40 ~ .,
-                  data = training_set,
-                  method = "rf",
-                  tuneLength = 10,
-                  ntrees = 1000,
-                  importance = TRUE,
-                  trControl = controlObject)
-
-gbmGrid <- expand.grid(interaction.depth = seq(1, 7, by = 2),
-                                   n.trees = seq(100, 1000, by = 50),
-                                   n.minobsinnode = 10,
-                                   shrinkage = c(0.01, 0.1))
-set.seed(123)
-gbmModel <- train(D40 ~ .,
-                    data = training_set,
-                    method = "gbm",
-                    tuneGrid = gbmGrid,verbose=FALSE,
-                    trControl = controlObject)
-
-#resampling results these models were collected into caret’s resamples function
-allResamples <- resamples(list(MARS = earthModel,
-                                SVM = svmRModel,
-                                CART = rpartModel,
-                                "Boosted Tree" = gbmModel,
-                                "Random Forest" = rfModel))
-# Plot the RMSE values
-library(lattice)
-lattice::parallelplot(allResamples,metric = "MAE")#Rsquared & RMSE
-parallelPlot(allResamples)
-## Summary stats
-summary(allResamples)
-##Accuracy plots
-dotplot(allResamples)
-
-densityplot(allResamples,
-            auto.key = list(columns = 3),
-            pch = "|")
-bwplot(allResamples,
-       metric = "RMSE")
-xyplot(allResamples,
-       models = c("CART", "MARS"),
-       metric = "RMSE")
-
-##Variable importance
-# pre: assumes dependent variable is the last column
-library(e1071)
-model <- svm(Species ~ ., data = iris)
-class(model)
-predictors <- caret_featureSelection(training_set, test_set, n.pred=5)
-predictors
-plot(varImp(object=svmRModel),   main="GBM - Variable Importance")
-###Predictions
-svmPredictions <- predict(svmRModel, test_set)
-plot(svmPredictions,test_set$D40)
-
-## HIGHLIGHT NODE AND ITS MARKOV BLANKET
-res <- hc(dqddata)
-plot(res, highlight = c("ZTotalCost_income",mb(avg.boot1 , "ZTotalCost_income")))
-fitted <- bn.fit(res,dqddata)
-fitted$ZTotalCost_income
-nbcl = naive.bayes(dqddata, training = "ZTotalCost_income")
-nbcl.trained = bn.fit(nbcl, dqddata)
-nbcl.trained
-##Evaluating the Naive bayse Classifier with Cross Validation
-cv.nb = bn.cv(nbcl, data = dqddata, runs = 10, method = "k-fold", folds = 10)
-cv.b=bn.cv(nbcl, data = trainingData, runs = 10, method = "k-fold",
-      folds = 10, loss = "pred", loss.args = list(target = "ZTotalCost_income"))
-nbcl
-######Tree Augmented  Naive bayes Classifier
-tancl = tree.bayes(dqddata, training = "ZTotalCost_income")
-tancl.trained = bn.fit(tancl, dqddata)
-tancl.trained
-cv.tan = bn.cv("tree.bayes", data = dqddata, runs = 10, method = "k-fold",
-               folds = 10, algorithm.args = list(training = "Zafsi"))
-cv.tan
-plot(cv.nb, cv.tan, xlab = c("NAIVE BAYES", "TAN"))
-
-###ENSEMBLES AND CROSS vALIDATION
-#extract the BNs that were tted withdrawing each fold;
-kfold = bn.cv(trainingData, "hc", k = 10)
-ensemble = lapply(kfold, `[[`, "fitted")
-##predict each new student from each model;
-pred.ensemble = sapply(ensemble, predict, node = "Zafsi",
-                       data = testData, method = "bayes-lw")
-
-single= bn.fit(hc(trainingData,score = "bic")), trainingData)
-pred.single = predict(single, "Zafsi", testData, method = "bayes-lw")
-pred.single
+# Avaeraged RPART BBN
+avg.boot_rpt = averaged.network(boot_rpt, threshold = 0.5)
+#avg.boot_rpt$nodes$D1$mb
+#avg.boot$nodes$D1$mb
+# Plot the Bayesian network with the additional arcs
+sp = strength.plot(avg.boot_rpt, boot_rpt, shape = "ellipse",
+              main = "Bayesian Belief Network Feature Selection",
+              highlight = list(arcs = wl,col = "red"))
 
 
-output <- table(Actual=testData$Zafsi, pred.single)
-output
-cm <- as.matrix(output)
-####################################
-###########reating training set######
+qgraph(sp, layout = "spring", labels = nodes(avg.boot))
 
-levels(dqddata$ZStatutory_reserves)
-levels(dqddata$Zafsi)[1]<-"low"
-levels(dqddata$Zafsi)[2]<-"Median"
-levels(dqddata$Zafsi)[3]<-"High"
-levels(dqddata$Zafsi)
-#intrain=createDataPartition(dqddata$Zafsi, p=0.80, list = FALSE)
-intrain <- runif(nrow(dsurvey)) < 0.80
-trainingData<-dsurvey[intrain,]
-testData <- dsurvey[-intrain,]
-# Pull out the dependent variable
+#Model validation
+xval = bn.cv(df_sd, bn = "hc",
+                 algorithm.args = list(whitelist = wl), loss = "cor-lw",
+                 loss.args = list(target = "D1", n = 500), runs = 10)
 
-
-#####Random Forest Regression####
-library(randomForest)
-install.packages("AppliedPredictiveModeling")
-library(AppliedPredictiveModeling)
-library(MASS)
-library(rpart)
-library(rpart.plot)
-library(caret)
-library(class)
-library(ipred)
-library(caretEnsemble)
-library(MASS)
-library(kernlab)
-library(klaR)
-library(nnet)
-library(C50)
-require(devtools)
-require(neuralnet)
-require(lubridate)
-library(nnfor)
-require(forecast)
-install.packages("h20")
-library(h2o)   
-set.seed(1234)
-######Caret package()
-##model building
-#Tune algorithm parameters using an automatic grid search
-# prepare training scheme
-control <-trainControl(method="repeatedcv", number=10, repeats=3)
-metric <- "Accuracy"
-#train model
-set.seed(123)
-rf.mode = train(Znpls_tcap~.,data = trainingData,method = "rf",importance=TRUE,ntree=500,debug=TRUE,trControl=control,tuneLength=5)
-# summarize the model
-print(rf.mode)
-varImp(rf.mode ,type = 1)
-plot(varImp(rf.mode ,type = 1))#important variables
-
-###voting Ensembles
-#Bagged CART
-set.seed(917)
-fit.treebag = train(afsi ~.,data=trainingData,method = "knn'",metric=metric,trControl=control)
-# Random Forest
-fit.rf = train(x=trainX,y=trainingData$afsi,method = "rf",metric=metric,trControl=control,importance=TRUE)
-plot(fit.rf,)
-# summarize results
-bagging_results <-resamples(list(treebag=fit.treebag, rf=fit.rf))
-summary(bagging_results)
-##plots
-dotplot(bagging_results)
-#######KNN and Rpart heteroginious ensemble####
-# define training control
-tcontrol <-trainControl(method="cv", number=4,savePredictions=TRUE)
-# train a list of models
-algorithmList <-c('rf', 'rpart','svmPoly','nnet')
-set.seed(1233)
-
-models= caretList(Zafsi~Znet_int_marg+Zreer+Zpassets_gdp+Zhh_indebt+Zterm_trade+Zwballcom_ind+Ztasset_gdp
-    +Ztcost_to_inc+Zdeficit_gdp+Ztcredi_gdp+Zlarg_exp_gloans+Zdom_inf+Zdom_reer+Zsa_inflation+Zcurr_acc_gdp+Zint_spread
-    +Zsa_rate+Zcorpcredi_tcredit+Zgor+Zjse.asi,trControl=tcontrol,data=trainingData,methodList=algorithmList)
-##
-models= caretList(Znpls_tcap~.,trControl=tcontrol,data=trainingData,methodList=algorithmList)
-
-
-results <-resamples(models)
-summary(results)
-dotplot(results)
-# correlation between results
-mrc=modelCor(results)
-splom(results)
-
-# Example of prediction output
-pred(models, features) %>% head()
- 
-predict_ens<-Predict(models,testData)#ensemble prediction
-
-# Compute the accumulated local effects for all features
-library(iml)
-install.packages("patchwork")
-library(patchwork)
-eff <- FeatureEffects$new(predict_ens)
-eff$plot(ncol=2)
-####Feature Importance
-# Compute feature importances as the performance drop in mean absolute error
-imp <- FeatureImp$new(predict_ens, loss = "mae")
-plot(imp)
-######NEURAL NETWORK########
-set.seed(123)
-
-ntrain <- runif(nrow(ddsurvey)) < 0.80
-trainData<-ddsurvey[intrain,]#continuous
-testingData <- ddsurvey[-intrain,]#continuous
-nn <- neuralnet(Zafsi~Znet_int_marg+Zreer+Zpassets_gdp+Zhh_indebt+Zterm_trade+Zwballcom_ind+Ztasset_gdp
-                +Ztcost_to_inc+Zdeficit_gdp+Ztcredi_gdp+Zlarg_exp_gloans+Zdom_inf+Zdom_reer+Zsa_inflation+Zcurr_acc_gdp+Zint_spread
-                +Zsa_rate+Zcorpcredi_tcredit+Zgor+Zjse.asi,trainData,hidden=c(5,3),linear.output=TRUE)
-
-predict<- predict(nn,newdata=testingData)#NN prediction
-######Feature effect
-# Compute the accumulated local effects for all features
-install.packages("iml")
-library(iml)
-eff <- FeatureEffects$ne
-
-##times series
-plot(dsurvey$Zafsi,col="blue",type="l",main="Actual vs Predicted curve",lwd=2)
-lines(predict,type = "l",col="red",lwd=1)
-
-###Creating dates
-head(annp)
-
-#########FORECASTING#############
-prediction<- predict(models$nnet,newdata=testData,type="raw")
-prediction
-##Ploting
-plot(models$nnet)
-
-# Create confusion matrix
-conf=confusionMatrix(prediction,testData$Zafsi,plot=TRUE)
-
-output <- table(Actual=testData$Zafsi, prediction)
-output
-cm <- as.matrix(output)
-cm
-
-##########simple Random forest######
-library(randomForest)
-Rfdata = data.frame(CleandScaled)
-fmodel=randomForest(NPL_Ratio~.,data=df_sd ,ntree = 1000,nodesize = 7,,importance=TRUE)
-varImpPlot(fmodel,type = 1)
-varImp(fmodel,type = 1)
-importance(fmodel)
-pred <- predict(fmodel,newdata=testData,type = 'class')
-Conf.afsi <- table(truth = testData$afsi,pred)
-
-
+#--------------------- END ------------------ 
